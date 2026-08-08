@@ -1,21 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Server, Wifi, XCircle, Volume2, VolumeX, Play, Pause, ArrowLeft, Loader, Activity } from "lucide-react";
+import { Server, Wifi, XCircle, Volume2, VolumeX, Play, Pause, ArrowLeft, Loader, Activity, User, Users } from "lucide-react";
 
-const API_BASE = "http://localhost:8000";
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const WS_BASE = "ws://localhost:8001";   // State coordinator — single source of truth
 
-// ─── CATALOGUE ────────────────────────────────────────────
-// All 5 titles — 5 are playable, rest are placeholder visual filler
+// ─── CATALOGUE ─────────────────────────────────────────────────────────────────
 const CATALOGUE = [
-  { id: "spiderman", title: "The Amazing Spider-Man 2", year: 2014, poster: "/spiderman2.png", video: "/video.mp4",        playable: true  },
-  { id: "topgun",    title: "Top Gun: Maverick",        year: 2022, poster: "/topgun.png",       video: "/topgun.mp4",     playable: true  },
-  { id: "chhaava",   title: "Chhaava",                  year: 2025, poster: "/chhaava.png",      video: "/chhaava.mp4",    playable: true  },
-  { id: "social",    title: "The Social Network",        year: 2010, poster: "/socialnetwork.png",video: "/socialnetwork.mp4", playable: true },
-  { id: "rush",      title: "Rush Hour 3",               year: 2007, poster: "/rushhour3.png",   video: "/rushhour3.mp4",  playable: true  },
-  // Placeholder fillers — same poster, not clickable
+  { id: "spiderman", title: "The Amazing Spider-Man 2", year: 2014, poster: "/spiderman2.png", video: "/video.mp4",           playable: true  },
+  { id: "topgun",    title: "Top Gun: Maverick",        year: 2022, poster: "/topgun.png",       video: "/topgun.mp4",        playable: true  },
+  { id: "chhaava",   title: "Chhaava",                  year: 2025, poster: "/chhaava.png",      video: "/chhaava.mp4",       playable: true  },
+  { id: "social",    title: "The Social Network",        year: 2010, poster: "/socialnetwork.png",video: "/socialnetwork.mp4", playable: true  },
+  { id: "rush",      title: "Rush Hour 3",               year: 2007, poster: "/rushhour3.png",   video: "/rushhour3.mp4",     playable: true  },
   { id: "ph1",  title: "Interstellar",    year: 2014, poster: "/spiderman2.png",   video: null, playable: false },
   { id: "ph2",  title: "Dune: Part Two",  year: 2024, poster: "/topgun.png",       video: null, playable: false },
   { id: "ph3",  title: "Oppenheimer",     year: 2023, poster: "/chhaava.png",      video: null, playable: false },
@@ -25,13 +22,12 @@ const CATALOGUE = [
 const PLAYABLE = CATALOGUE.filter((c) => c.playable);
 const FILLER   = CATALOGUE.filter((c) => !c.playable);
 
-// ─── SERVER STATE ─────────────────────────────────────────
+// ─── SERVER STATE (initial) ────────────────────────────────────────────────────
 const makeInitialServers = () => [
   { id: "srv-1", label: "Server 1", status: "active" },
   { id: "srv-2", label: "Server 2", status: "standby" },
   { id: "srv-3", label: "Server 3", status: "standby" },
 ];
-let serverCounter = 4;
 
 const STATUS_COLORS = {
   active:  "var(--healthy)",
@@ -41,175 +37,125 @@ const STATUS_COLORS = {
   booting: "var(--boot)",
 };
 
-// ─── LOG HELPERS ──────────────────────────────────────────
+// ─── LOG HELPERS ───────────────────────────────────────────────────────────────
 let logIdCounter = 0;
-const pad = (n) => String(n).padStart(2, "0");
+const pad     = (n) => String(n).padStart(2, "0");
 const makeLog = (msg, type = "info") => {
   const d = new Date();
   const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   return { id: logIdCounter++, msg, type, time };
 };
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 //  ROOT PAGE
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 export default function Home() {
-  const videoRef     = useRef(null);
-  const logEndRef    = useRef(null);
-  // Stable refs used inside the SSE handler (avoids stale closure issues)
-  const isSlowModeRef     = useRef(false);
-  const serversRef        = useRef([]);
-  const isBusyRef         = useRef(false);
-  const prevPodIdRef      = useRef(null);
-  const handleAutoHealRef = useRef(null);  // always points to latest handleAutoHeal
+  const videoRef    = useRef(null);
+  const logEndRef   = useRef(null);
+  const wsRef       = useRef(null);
+  const viewerIdRef = useRef(null);
 
-  const [muted, setMuted]               = useState(true);
-  const [isPaused, setIsPaused]         = useState(false);
-  const [nowPlaying, setNowPlaying]     = useState(null);
-  const [isBuffering, setIsBuffering]   = useState(false);
-  const [isSlowMode, setIsSlowMode]     = useState(false);
-  const [servers, setServers]           = useState(makeInitialServers);
-  const [isBusy, setIsBusy]             = useState(false);
-  const [countdown, setCountdown]       = useState(null);  // seconds until K8s auto-heals
-  // Start logs EMPTY — initial message added in useEffect (client-only) to avoid hydration mismatch
-  const [logs, setLogs]                 = useState([]);
+  // ── Per-tab local state ────────────────────────────────────────────────────
+  const [muted,      setMuted]      = useState(true);
+  const [isPaused,   setIsPaused]   = useState(false);
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const [countdown,  setCountdown]  = useState(null);
+  const [logs,       setLogs]       = useState([]);
 
-  // Keep refs in sync with state so SSE handler always reads fresh values
-  useEffect(() => { isSlowModeRef.current = isSlowMode; }, [isSlowMode]);
-  useEffect(() => { serversRef.current    = servers;    }, [servers]);
-  useEffect(() => { isBusyRef.current     = isBusy;     }, [isBusy]);
+  // ── Shared state — driven entirely by WebSocket from state server ──────────
+  const [servers,     setServers]     = useState(makeInitialServers);
+  const [viewers,     setViewers]     = useState([]);          // all connected viewers
+  const [isSlowMode,  setIsSlowMode]  = useState(false);
+  const [slowServerId,setSlowServerId]= useState(null);        // which server is slow
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [isBusy,      setIsBusy]      = useState(false);
 
-  // Add initial "System ready" log only on the client to avoid SSR timestamp mismatch
+  // Initial log — client-only to avoid SSR hydration mismatch
   useEffect(() => {
     setLogs([makeLog("System ready. Select a title to begin streaming.", "info")]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);  // runs once on mount (client only)
+  }, []);
 
   const addLog = useCallback((msg, type = "info") => {
     setLogs((prev) => [...prev, makeLog(msg, type)]);
   }, []);
 
-  // Auto-scroll log to bottom
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  // SSE — pinned to ONE pod. When the slow pod is killed by K8s, the SSE
-  // drops and reconnects to a fresh healthy pod. The FIRST message from that
-  // new pod has slow_mode:false — that's our reliable auto-heal signal.
+  // ── WebSocket — single source of truth for all shared state ───────────────
   useEffect(() => {
-    let justReconnected = false;
-    let lastMsgTime = Date.now();
+    const ws = new WebSocket(`${WS_BASE}/ws`);
+    wsRef.current = ws;
 
-    const sse = new EventSource(`${API_BASE}/stream`);
-
-    sse.onmessage = (e) => {
-      lastMsgTime = Date.now();
-      const data = JSON.parse(e.data);
-      const newPodId = data.pod_id;
-
-      // ── TRIGGER 1: pod_id changed ──────────────────────────────────────────
-      const podChanged = prevPodIdRef.current && prevPodIdRef.current !== newPodId;
-      // ── TRIGGER 2: first message after any reconnect ───────────────────────
-      const freshConnect = justReconnected;
-      justReconnected = false;
-      // ── TRIGGER 3: slow_mode just flipped to false on any message ──────────
-      const slowFlipped = !data.slow_mode && isSlowModeRef.current;
-
-      if ((podChanged || freshConnect || slowFlipped) && !data.slow_mode && isSlowModeRef.current && !isBusyRef.current) {
-        handleAutoHealRef.current?.();
-      }
-
-      prevPodIdRef.current = newPodId;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "VIEWER_JOIN" }));
     };
 
-    sse.onerror = () => {
-      justReconnected = true;
-      console.log("SSE dropped — reconnecting...");
+    ws.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+
+      // Shared state update
+      if (msg.state) {
+        setServers(msg.state.servers);
+        setViewers(msg.state.viewers || []);
+        setIsSlowMode(msg.state.isSlowMode);
+        setSlowServerId(msg.state.slowServerId || null);
+        setIsBuffering(msg.state.isBuffering);
+        setIsBusy(msg.state.isBusy);
+        if (!msg.state.isSlowMode) setCountdown(null);
+      }
+
+      // Log messages broadcast by coordinator
+      if (msg.log) addLog(msg.log.msg, msg.log.type);
+
+      // Store this tab's viewer ID
+      if (msg.type === "YOUR_VIEWER_ID") viewerIdRef.current = msg.viewerId;
+
+      // We handle video pause/play in a separate useEffect watching `isBuffering` now
+      // so this block is removed.
     };
 
-    // ── WATCHDOG: fires if SSE goes silent for >6s while in slow mode ────────
-    // In slow mode the backend sends a heartbeat every ~3.8s. If we haven't
-    // heard anything for 6s, the connection is stale (port-forward TCP can hang
-    // without a clean close). We trigger auto-heal immediately instead of waiting
-    // for the reconnect — this cuts the "awkward pause" from ~30s to ~0s.
-    const watchdog = setInterval(() => {
-      if (isSlowModeRef.current && !isBusyRef.current && Date.now() - lastMsgTime > 6000) {
-        console.log("SSE watchdog: silence > 6s in slow mode — triggering auto-heal");
-        handleAutoHealRef.current?.();
-      }
-    }, 500);
+    ws.onerror = (err) => console.warn("[WS] error", err);
+    ws.onclose = ()    => console.log("[WS] closed");
 
-    return () => { sse.close(); clearInterval(watchdog); };
+    return () => {
+      if (viewerIdRef.current && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: "VIEWER_LEAVE", viewerId: viewerIdRef.current })); } catch (_) {}
+      }
+      ws.close();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);  // stable — reads all values via refs
+  }, []);
 
+  // ── Derived: is THIS tab's stream degraded? ────────────────────────────────
+  // #4 Degrade isolation — only blur if THIS viewer's server is slow.
+  // Global isSlowMode is for button labels and countdown only.
+  const myViewer         = useMemo(
+    () => viewers.find((v) => v.id === viewerIdRef.current),
+    [viewers]
+  );
+  const myServerIsSlow   = useMemo(
+    () => myViewer?.serverId === slowServerId && isSlowMode,
+    [myViewer, slowServerId, isSlowMode]
+  );
 
-  const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !muted;
-      setMuted((m) => !m);
-    }
-  };
-
-  // ── Auto-heal triggered by SSE detection ────────────────
-  // Called automatically when K8s kills the slow pod and SSE reconnects to a healthy one.
-  const handleAutoHeal = useCallback(async () => {
-    // Guard: don't double-fire
-    if (isBusyRef.current) return;
-    isBusyRef.current = true;
-    setIsBusy(true);
-    setCountdown(null);
-
-    const currentServers = serversRef.current;
-    const slowServer    = currentServers.find((s) => s.status === "slow");
-    const standbyServer = currentServers.find((s) => s.status === "standby");
-
-    addLog("🤖 Kubernetes detected health-check timeout — auto-healing gray failure!", "boot");
-
-    if (slowServer) {
-      setServers((prev) => prev.map((s) => s.id === slowServer.id ? { ...s, status: "dead" } : s));
-    }
-    await sleep(500);
-
-    if (standbyServer) {
-      setServers((prev) => prev.map((s) => s.id === standbyServer.id ? { ...s, status: "active" } : s));
-    }
-    setIsSlowMode(false);
-    isSlowModeRef.current = false;
-    if (videoRef.current) videoRef.current.play().catch(() => {});
-    addLog(`Traffic restored to ${standbyServer?.label ?? "healthy server"} — video quality back to normal.`, "ok");
-
-    await sleep(500);
-
-    const newId    = `srv-${serverCounter++}`;
-    const newLabel = `Server ${serverCounter - 1}`;
-    addLog(`Kubernetes spawning ${newLabel} to restore replica count to 3...`, "boot");
-    setServers((prev) => [
-      ...prev.filter((s) => s.id !== slowServer?.id),
-      { id: newId, label: newLabel, status: "booting" },
-    ]);
-
-    await sleep(1400);
-    setServers((prev) => prev.map((s) => s.id === newId ? { ...s, status: "standby" } : s));
-    addLog(`${newLabel} online — cluster fully healed. All 3 replicas healthy. ✅`, "ok");
-
-    await sleep(800);
-    isBusyRef.current = false;
-    setIsBusy(false);
-  }, [addLog]);
-
-  // Keep handleAutoHealRef in sync so SSE closure always calls the latest version
-  useEffect(() => { handleAutoHealRef.current = handleAutoHeal; }, [handleAutoHeal]);
-
-  // ── Countdown timer during slow mode ───────────────────
-  // Shows how many seconds until K8s auto-heals (~14s: 2 failures × (5s period + 2s timeout))
+  // ── Pause video during buffering/kill events ───────────────────────────────
   useEffect(() => {
-    if (!isSlowMode) {
-      setCountdown(null);
-      return;
+    if (!videoRef.current) return;
+    if (isBuffering) {
+      videoRef.current.pause();
+    } else if (!isPaused && nowPlaying) {
+      videoRef.current.play().catch(() => {});
     }
-    const HEAL_SECONDS = 7;  // period=2s + timeout=2s + failureThreshold=1 + restart ~3s
+  }, [isBuffering, isPaused, nowPlaying]);
+
+  // ── Countdown during slow mode ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!isSlowMode) { setCountdown(null); return; }
+    const HEAL_SECONDS = 13;
     setCountdown(HEAL_SECONDS);
     const interval = setInterval(() => {
       setCountdown((c) => {
@@ -220,12 +166,13 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isSlowMode]);
 
-  // ── /health poll — REMOVED ─────────────────────────────
-  // Polling /health is unreliable because port-forward load-balances across
-  // ALL 3 pods. We'd always hit a healthy pod and get slow_mode:false immediately.
-  // The SSE stream (below) stays pinned to ONE pod — that's the correct signal.
+  const toggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !muted;
+      setMuted((m) => !m);
+    }
+  };
 
-  // ── Start playing a title ──────────────────────────────
   const playTitle = (title) => {
     setNowPlaying(title);
     setIsPaused(false);
@@ -249,145 +196,66 @@ export default function Home() {
     }
   };
 
-  // ── Go back to homepage ────────────────────────────────
   const goHome = () => {
     if (videoRef.current) videoRef.current.pause();
     setNowPlaying(null);
-    setIsSlowMode(false);
-    setIsBuffering(false);
     setIsPaused(false);
     addLog("Stopped playback. Returned to homepage.", "info");
   };
 
-  // ─── KILL ACTION ───────────────────────────────────────
-  const triggerCrash = useCallback(async () => {
+  // ─── KILL ACTION ────────────────────────────────────────────────────────────
+  // #5 Seamless kill: video keeps playing. The buffering overlay shows visually
+  // around the still-playing video — no pause/resume cycle on the video element.
+  const triggerCrash = useCallback(() => {
     if (isBusy || !nowPlaying) return;
-    setIsBusy(true);
+    // DO NOT pause video — it plays continuously through the kill event.
+    // The infra layer + log animations tell the story without touching the video.
+    wsRef.current?.send(JSON.stringify({ type: "CHAOS_KILL" }));
+  }, [isBusy, nowPlaying]);
 
-    const activeServer = servers.find((s) => s.status === "active" || s.status === "slow");
-    // Pick the first standby — this is the pod K8s will route traffic to immediately
-    const standbyServer = servers.find((s) => s.status === "standby");
-    if (!activeServer) { setIsBusy(false); return; }
-
-    addLog(`Killing ${activeServer.label}...`, "error");
-
-    // Freeze video + buffering ring
-    setIsBuffering(true);
-    if (videoRef.current) videoRef.current.pause();
-
-    // Mark active server as dead
-    setServers((prev) =>
-      prev.map((s) => s.id === activeServer.id ? { ...s, status: "dead" } : s)
-    );
-    try { await fetch(`${API_BASE}/crash`, { method: "POST" }); } catch (_) {}
-
-    await sleep(600);
-    addLog(`${activeServer.label} terminated. Re-routing traffic...`, "error");
-
-    // STEP 2: Promote a standby to active immediately (this is zero-downtime)
-    // In real K8s the load balancer already routes to healthy pods — we mirror that here.
-    if (standbyServer) {
-      setServers((prev) =>
-        prev.map((s) => s.id === standbyServer.id ? { ...s, status: "active" } : s)
-      );
-      setIsBuffering(false);
-      setIsPaused(false);
-      if (videoRef.current) videoRef.current.play().catch(() => {});
-      addLog(`Traffic rerouted to ${standbyServer.label} — stream uninterrupted.`, "ok");
-    }
-
-    await sleep(600);
-
-    // STEP 3: Remove dead server, K8s spawns a fresh pod to restore replica count to 3
-    const newId    = `srv-${serverCounter++}`;
-    const newLabel = `Server ${serverCounter - 1}`;
-    addLog(`Kubernetes detected missing replica — spawning ${newLabel} to restore count to 3...`, "boot");
-    setServers((prev) => [
-      ...prev.filter((s) => s.id !== activeServer.id),
-      { id: newId, label: newLabel, status: "booting" },
-    ]);
-
-    await sleep(1400);
-
-    // New pod finishes booting — goes to STANDBY (not active, standbys handle it)
-    setServers((prev) =>
-      prev.map((s) => s.id === newId ? { ...s, status: "standby" } : s)
-    );
-    addLog(`${newLabel} online — replica count restored to 3. ${newLabel} on standby.`, "ok");
-
-    await sleep(1500);
-    setIsBusy(false);
-  }, [isBusy, nowPlaying, servers, addLog]);
-
-  // ─── SLOW ACTION (toggle) ──────────────────────────────
-  const triggerSlow = useCallback(async () => {
+  // ─── SLOW ACTION ────────────────────────────────────────────────────────────
+  const triggerSlow = useCallback(() => {
     if (isBusy || !nowPlaying) return;
-    setIsBusy(true);
+    wsRef.current?.send(JSON.stringify({ type: "CHAOS_SLOW" }));
+  }, [isBusy, nowPlaying]);
 
-    if (isSlowMode) {
-      // UNDO slow mode manually
-      setIsSlowMode(false);
-      setCountdown(null);
-      setServers((prev) =>
-        prev.map((s) => s.status === "slow" ? { ...s, status: "active" } : s)
-      );
-      try { await fetch(`${API_BASE}/reset`, { method: "POST" }); } catch (_) {}
-      addLog("Slowdown manually removed — server restored to normal performance.", "ok");
-      setIsBusy(false);
-      return;
-    }
-
-    const activeServer = servers.find((s) => s.status === "active");
-    if (!activeServer) { setIsBusy(false); return; }
-
-    addLog(`Injecting latency into ${activeServer.label}...`, "warn");
-    setIsSlowMode(true);
-    setServers((prev) =>
-      prev.map((s) => s.id === activeServer.id ? { ...s, status: "slow" } : s)
-    );
-    try { await fetch(`${API_BASE}/slow`, { method: "POST" }); } catch (_) {}
-    addLog(`${activeServer.label} degraded (Gray Failure). K8s health probe will time out in ~7s and auto-heal!`, "warn");
-    setIsBusy(false);
-  }, [isBusy, nowPlaying, isSlowMode, servers, addLog]);
-
-  // ─── RESET ACTION ──────────────────────────────────────
-  const triggerReset = useCallback(async () => {
-    setIsBusy(true);
-    setIsBuffering(false);
-    setIsSlowMode(false);
+  // ─── RESET ACTION ───────────────────────────────────────────────────────────
+  const triggerReset = useCallback(() => {
     setIsPaused(false);
-    setCountdown(null);
-    serverCounter = 4;
-    setServers(makeInitialServers());
-    if (videoRef.current) videoRef.current.play().catch(() => {});
-    try { await fetch(`${API_BASE}/reset`, { method: "POST" }); } catch (_) {}
-    addLog("Cluster reset — all 3 servers restored to healthy state.", "ok");
-    await sleep(600);
-    setIsBusy(false);
-  }, [addLog]);
+    if (videoRef.current && videoRef.current.paused) {
+      videoRef.current.play().catch(() => {});
+    }
+    wsRef.current?.send(JSON.stringify({ type: "CHAOS_RESET" }));
+  }, []);
 
-  // ─── DERIVED ───────────────────────────────────────────
+  // ─── DERIVED ────────────────────────────────────────────────────────────────
   const isVideoPlaying = !!nowPlaying;
-  const activeServer   = servers.find((s) => s.status === "active" || s.status === "slow");
-  const heroTitle      = PLAYABLE[0]; // First playable = hero banner feature
+  const heroTitle      = PLAYABLE[0];
+  const activeServersCount = servers.filter(s => s.status === "active").length;
 
   return (
     <div className="dashboard">
 
-      {/* ── HEADER ─────────────────────────────────────── */}
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
       <header>
         <h1>Chaos Engineering <span className="accent">Live Demo</span></h1>
         <div className="tagline">
           <span className="live-dot" />
           Kill a server. Watch nothing break.
+          {viewers.length > 0 && (
+            <span className="viewer-count">
+              <Users size={12} /> {viewers.length} viewer{viewers.length !== 1 ? "s" : ""} connected
+            </span>
+          )}
         </div>
       </header>
 
-      {/* ── TOP ROW ────────────────────────────────────── */}
+      {/* ── TOP ROW ────────────────────────────────────────────────────────── */}
       <div className="top-section">
 
-        {/* LEFT: Streaming box — homepage OR player, same box */}
-        <div className={`glass-panel streaming-box ${isSlowMode ? "is-slow" : "is-normal"}`}>
+        {/* LEFT: Streaming box */}
+        {/* #4 Fix: use myServerIsSlow (scoped to this tab's server), not global isSlowMode */}
+        <div className={`glass-panel streaming-box ${myServerIsSlow ? "is-slow" : "is-normal"}`}>
           <AnimatePresence mode="wait">
             {nowPlaying ? (
               /* ── PLAYER VIEW ── */
@@ -399,7 +267,6 @@ export default function Home() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                {/* Topbar is NOT inside the blur wrapper — always crisp */}
                 <div className="player-topbar">
                   <div className="player-controls-bar">
                     <button className="ctrl-btn back" onClick={goHome}>
@@ -419,8 +286,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* ONLY the video element gets the blur — overlays are outside this wrapper */}
-                <div className={`video-el-wrap ${isSlowMode ? "is-slow" : ""}`}>
+                {/* #4 Fix: use myServerIsSlow for the blur */}
+                <div className={`video-el-wrap ${myServerIsSlow ? "is-slow" : ""}`}>
                   <video
                     ref={videoRef}
                     src={nowPlaying.video}
@@ -431,7 +298,7 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Buffering overlay — outside blur wrapper, always crisp */}
+                {/* Buffering overlay — shown during kill rerouting, video still plays behind it */}
                 <AnimatePresence>
                   {isBuffering && (
                     <motion.div
@@ -442,7 +309,7 @@ export default function Home() {
                       transition={{ duration: 0.25 }}
                     >
                       <div className="buffer-spinner" />
-                      <p>Reconnecting to server...</p>
+                      <p>Rerouting to healthy server...</p>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -458,7 +325,6 @@ export default function Home() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                {/* Hero banner featuring first playable title */}
                 <div className="hero-banner">
                   <img className="hero-bg" src={heroTitle.poster} alt="" />
                   <div className="hero-overlay">
@@ -523,7 +389,6 @@ export default function Home() {
         <div className="glass-panel controls-panel">
           <h2>Chaos Controls</h2>
 
-          {/* Buttons ALWAYS at top */}
           <div className="btns">
             <button
               className="btn btn-crash"
@@ -548,7 +413,6 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Countdown banner during slow mode */}
           {isSlowMode && (
             <div className="countdown-banner">
               <span className="countdown-label">⏱ K8s auto-heal</span>
@@ -563,14 +427,12 @@ export default function Home() {
             </div>
           )}
 
-          {/* Gate message — shown when video is NOT playing */}
           {!isVideoPlaying && (
             <div className="gate-msg">
               ⚠ Start playing a video first — select any title from the streaming homepage on the left to enable chaos controls.
             </div>
           )}
 
-          {/* Live text log */}
           <div className="log-section">
             <div className="log-label">
               <Activity size={11} /> Live System Log
@@ -591,10 +453,15 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── INFRA FLOW DIAGRAM (unchanged) ─────────────── */}
+      {/* ── INFRA FLOW DIAGRAM ─────────────────────────────────────────────── */}
       <div className="glass-panel infra-panel">
         <div className="infra-title">
-          Infrastructure Layer — {servers.length} servers running
+          Infrastructure Layer — {servers.length} server{servers.length !== 1 ? "s" : ""} running
+          {activeServersCount > 1 && (
+            <span style={{ color: "var(--boot)", marginLeft: "0.5rem" }}>
+              · {activeServersCount} active (load balanced)
+            </span>
+          )}
           {isVideoPlaying && nowPlaying && (
             <span style={{ color: "var(--healthy)", marginLeft: "0.75rem" }}>
               ● Streaming: {nowPlaying.title}
@@ -608,16 +475,17 @@ export default function Home() {
             <span>You</span>
           </div>
 
+          {/* Traffic dot speed driven by THIS tab's server, not global */}
           <div className="traffic-track">
             <motion.div
               className="traffic-dot"
               style={{
-                color:      isSlowMode ? "var(--slow)" : "var(--healthy)",
-                background: isSlowMode ? "var(--slow)" : "var(--healthy)",
+                color:      myServerIsSlow ? "var(--slow)" : "var(--healthy)",
+                background: myServerIsSlow ? "var(--slow)" : "var(--healthy)",
               }}
               animate={{ left: ["0%", "95%"] }}
               transition={{
-                duration: isSlowMode ? 3.8 : 1.2,
+                duration: myServerIsSlow ? 3.8 : 1.2,
                 repeat:   Infinity,
                 ease:     "linear",
               }}
@@ -627,7 +495,12 @@ export default function Home() {
           <div className="servers-row">
             <AnimatePresence mode="popLayout">
               {servers.map((server) => (
-                <ServerNode key={server.id} server={server} />
+                <ServerNode
+                  key={server.id}
+                  server={server}
+                  viewers={viewers.filter((v) => v.serverId === server.id)}
+                  myViewerId={viewerIdRef.current}
+                />
               ))}
             </AnimatePresence>
           </div>
@@ -638,9 +511,10 @@ export default function Home() {
   );
 }
 
-// ─── SERVER NODE ─────────────────────────────────────────
-function ServerNode({ server }) {
-  const color    = STATUS_COLORS[server.status] || STATUS_COLORS.standby;
+// ─── SERVER NODE ──────────────────────────────────────────────────────────────
+// #2: Accepts viewers prop. Stacks viewer pips vertically below the node circle.
+function ServerNode({ server, viewers = [], myViewerId }) {
+  const color     = STATUS_COLORS[server.status] || STATUS_COLORS.standby;
   const isActive  = server.status === "active";
   const isSlow    = server.status === "slow";
   const isDead    = server.status === "dead";
@@ -685,6 +559,51 @@ function ServerNode({ server }) {
 
       <div className="node-label">{server.label}</div>
       <div className="node-status" style={{ color }}>{server.status}</div>
+
+      {/* #2: Viewer pips — stacked vertically, animated in/out */}
+      <div className="viewer-pips">
+        <AnimatePresence initial={false}>
+          {viewers.map((viewer, i) => (
+            <ViewerPip
+              key={viewer.id}
+              viewer={viewer}
+              index={i}
+              isMine={viewer.id === myViewerId}
+            />
+          ))}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── VIEWER PIP ───────────────────────────────────────────────────────────────
+// Animated join/leave pip for each viewer attached to a server.
+// Pop in from above, stack downward, fade+compress on remove.
+function ViewerPip({ viewer, index, isMine }) {
+  const STATUS_DOT = {
+    ok:           "var(--healthy)",
+    degraded:     "var(--slow)",
+    reconnecting: "var(--dead)",
+  };
+  const dotColor = STATUS_DOT[viewer.status] || STATUS_DOT.ok;
+
+  return (
+    <motion.div
+      className={`viewer-pip ${isMine ? "viewer-pip--mine" : ""}`}
+      layout
+      initial={{ opacity: 0, height: 0, y: -8 }}
+      animate={{ opacity: 1, height: "auto", y: 0 }}
+      exit={{ opacity: 0, height: 0, y: -8 }}
+      transition={{
+        layout:  { type: "spring", stiffness: 400, damping: 30 },
+        default: { duration: 0.25, ease: "easeOut" },
+      }}
+    >
+      <span className="pip-dot" style={{ background: dotColor }} />
+      <User size={10} />
+      <span className="pip-index">{index}</span>
+      {isMine && <span className="pip-you">you</span>}
     </motion.div>
   );
 }

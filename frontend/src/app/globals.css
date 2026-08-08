@@ -60,6 +60,20 @@ header h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
   align-items: center;
   gap: 0.5rem;
 }
+.viewer-count {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 20px;
+  background: rgba(16,185,129,0.12);
+  border: 1px solid rgba(16,185,129,0.25);
+  color: var(--healthy);
+  font-size: 0.72rem;
+  font-weight: 600;
+  animation: glow-in 0.4s ease;
+}
+@keyframes glow-in { from { opacity:0; transform: scale(0.85); } to { opacity:1; transform: scale(1); } }
 .live-dot {
   display: inline-block;
   width: 8px; height: 8px;
@@ -471,7 +485,10 @@ header h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
   letter-spacing: 0.07em;
   color: var(--muted);
 }
-.infra-flow { display: flex; align-items: center; flex: 1; gap: 0; }
+.infra-flow { display: flex; align-items: flex-start; flex: 1; gap: 0; padding-top: 10px; }
+
+/* User node & track aligned to top of server circles */
+.user-node { margin-top: 4px; }
 
 /* ─── USER NODE ──────────────────────────────────────── */
 .user-node { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex-shrink: 0; width: 64px; }
@@ -503,10 +520,10 @@ header h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
 }
 
 /* ─── SERVERS ROW ────────────────────────────────────── */
-.servers-row { display: flex; gap: 0.9rem; flex-shrink: 0; }
+.servers-row { display: flex; gap: 0.9rem; flex-shrink: 0; align-items: flex-start; }
 
 /* ─── SERVER NODE ────────────────────────────────────── */
-.server-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; width: 80px; }
+.server-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; width: 86px; }
 
 .server-beam {
   position: absolute;
@@ -547,3 +564,59 @@ header h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
 }
 .node-label { font-size: 0.65rem; font-weight: 600; color: var(--text); text-align: center; }
 .node-status { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; }
+
+/* ─── VIEWER PIPS ───────────────────────────────────── */
+/* Container below the server node — stacks pips vertically */
+.viewer-pips {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  width: 100%;
+  margin-top: 0.3rem;
+  overflow: hidden;    /* lets height:0 collapse smoothly on exit */
+}
+
+/* Individual pip row */
+.viewer-pip {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.62rem;
+  color: var(--muted);
+  padding: 0.18rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Highlight for "this" tab's viewer */
+.viewer-pip--mine {
+  background: rgba(16,185,129,0.12);
+  border-color: rgba(16,185,129,0.3);
+  color: var(--healthy);
+}
+
+/* Status dot inside pip */
+.pip-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pip-index {
+  font-weight: 600;
+  font-size: 0.6rem;
+}
+
+.pip-you {
+  margin-left: auto;
+  font-size: 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}

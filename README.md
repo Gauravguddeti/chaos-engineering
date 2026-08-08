@@ -1,65 +1,122 @@
-# Chaos Engineering & Self-Healing Cluster
+# StreamFlux: Chaos Engineering & Self-Healing Cluster
 
-A live, interactive demonstration of **Chaos Engineering** and **Self-Healing Infrastructure**, inspired by Netflix's Chaos Monkey and modern Site Reliability Engineering (SRE) practices.
+StreamFlux is a real-time, interactive demonstration of **Chaos Engineering** and **Self-Healing Infrastructure** using Kubernetes. Modeled after modern streaming giants like Netflix, this project showcases how cloud-native architectures can survive catastrophic server failures and degraded network conditions with **zero downtime** for the end user.
 
-This project simulates a streaming platform (like Netflix) and allows you to intentionally inject failures (crashes and gray failures) into the live system to watch Kubernetes automatically detect the failure, reroute traffic, and self-heal in real-time with zero user downtime.
+This project features a fully functional video streaming frontend connected to a robust, containerized backend orchestrated by Kubernetes.
 
-## 🌟 Key Features
+---
 
-*   **StreamFlux UI:** A Next.js-based streaming interface simulating real user traffic.
-*   **Zero-Downtime Hard Failures:** "Kill" a server mid-stream and watch Kubernetes immediately reroute traffic to a standby node without stopping the video.
-*   **Gray Failure Auto-Healing (Slowdown):** Inject a "slow mode" that simulates network degradation or CPU starvation. Kubernetes detects the timeout via Liveness Probes and automatically restarts the unhealthy container.
-*   **Real-time Visualization:** An animated infrastructure layer shows live network traffic, node statuses (Active, Standby, Slow, Dead), and a real-time system event log using Server-Sent Events (SSE).
+## 🚀 Features
 
-## 🏗️ Architecture Stack
+*   **Self-Healing Kubernetes Cluster**: A backend powered by a Minikube Kubernetes cluster running multiple replica pods. If a pod crashes, Kubernetes automatically detects the failure and spins up a replacement.
+*   **Zero-Downtime Failover**: When the active server goes down, the centralized state coordinator instantly reroutes traffic to a healthy standby server, ensuring seamless video playback without buffering or pausing.
+*   **Gray Failure Simulation (Slowdown)**: Simulates degraded server performance (a "gray failure"). Kubernetes health probes detect the degradation and automatically heal the cluster by terminating the slow pod and launching a fresh one.
+*   **Multi-User State Synchronization**: Open multiple browser tabs! A centralized WebSocket coordinator ensures all viewers see the exact same cluster state, server status, and live event logs simultaneously.
+*   **Dynamic Load Balancing**: If too many viewers connect to a single server, the system automatically promotes a standby server to active status and redistributes the load.
+*   **Live Infrastructure Dashboard**: A real-time, animated topology map showing active servers, standby servers, traffic routing, and connected viewers.
 
-*   **Backend:** FastAPI (Python) - 3 Replicas
-*   **Frontend:** Next.js (React) with Framer Motion for animations
-*   **Containerization:** Docker
-*   **Orchestration:** Kubernetes (K8s) via Minikube
-*   **Communication:** Server-Sent Events (SSE) for real-time cluster state updates
+---
 
-## 🚀 Getting Started
+## 🛠️ Architecture & Tech Stack
 
-### Prerequisites
+The architecture is built purely on local, open-source tools—no cloud provider accounts required.
 
-You need the following installed on your machine. If you are on Windows, you can install all of them instantly using PowerShell (Run as Administrator):
+*   **Frontend**: Next.js (React), Framer Motion (Animations), pure CSS (Glassmorphism UI)
+*   **State Coordinator**: FastAPI (Python), WebSockets
+*   **Backend Application**: Python (Uvicorn/FastAPI)
+*   **Containerization**: Docker Desktop (WSL2 integration on Windows)
+*   **Orchestration**: Minikube (Local Kubernetes)
+
+![Infrastructure Diagram](./frontend/public/architecture.png) *(Note: Generate or add architecture screenshot here)*
+
+---
+
+## 💻 How to Run This Project on a New Machine
+
+To run this project on a different device, you need to install Docker Desktop and Minikube, then spin up the cluster.
+
+### 1. Prerequisites
+
+1.  **Docker Desktop**: Download and install [Docker Desktop for Windows/Mac/Linux](https://www.docker.com/products/docker-desktop/).
+    *   *Ensure Docker Desktop is running before proceeding.*
+2.  **Node.js & npm**: Download and install [Node.js](https://nodejs.org/).
+3.  **Python 3.10+**: Download and install [Python](https://www.python.org/downloads/).
+
+### 2. Install Minikube & Kubectl (Windows via PowerShell)
+
+Open PowerShell as Administrator and run the following commands to install Minikube using the Windows Package Manager (`winget`):
 
 ```powershell
-# Install Docker Desktop (Must be running before starting Minikube)
-winget install Docker.DockerDesktop
+winget install minikube
+```
+*(Alternatively, download the standalone `.exe` from the [Minikube Releases page](https://github.com/kubernetes/minikube/releases) and add it to your System PATH).*
 
-# Install Minikube
-winget install Kubernetes.minikube
+Kubectl (the Kubernetes command-line tool) is included with Docker Desktop.
 
-# Install Node.js (Required for Next.js frontend)
-winget install OpenJS.NodeJS.LTS
+### 3. Start the Kubernetes Cluster
+
+Start Minikube using the Docker driver:
+```powershell
+minikube start --driver=docker
 ```
 
-*(Note: `kubectl` is automatically installed alongside Docker Desktop.)*
+### 4. Build and Deploy the Backend
 
-### Installation & Deployment
-
-1.  **Rebuild and Deploy the Cluster**
-    Run the setup script which starts Minikube, builds the Docker image directly inside the Minikube environment, and applies the Kubernetes deployment configs.
-    ```bash
-    rebuild_cluster.bat
+1.  Point your shell's Docker environment to Minikube's internal Docker daemon (so Kubernetes can find your local image):
+    ```powershell
+    minikube docker-env | Invoke-Expression
+    ```
+2.  Build the backend Docker image:
+    ```powershell
+    cd backend
+    docker build -t chaos-backend:latest .
+    ```
+3.  Apply the Kubernetes configurations:
+    ```powershell
+    cd ../k8s
+    kubectl apply -f deployment.yaml
+    kubectl apply -f service.yaml
+    ```
+4.  Expose the Kubernetes service to your local machine (leave this running in a background terminal):
+    ```powershell
+    kubectl port-forward svc/chaos-backend-svc 8000:8000
     ```
 
-2.  **Start the Demo**
-    Run the startup script. This will launch the port-forwarding service to connect to the Kubernetes cluster and start the Next.js frontend.
-    ```bash
-    start_demo.bat
-    ```
+### 5. Start the State Coordinator
 
-3.  The dashboard will automatically open in your default browser at `http://localhost:3000`.
+Open a new terminal window, navigate to the `backend` folder, and start the WebSocket coordinator:
 
-## 🎮 How to Run the Demo
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate
+pip install -r requirements.txt
+python state_server.py
+```
 
-1.  Click on any movie in the "Available to Stream" row to start playback.
-2.  **Test Hard Failure:** Click **"Kill Active Server"**. The active node will die, traffic will instantly reroute to a standby node, and a new pod will be spawned by the Kubernetes ReplicaSet.
-3.  **Test Gray Failure:** Click **"Slow Down Active Server"**. The video quality will degrade (blur), simulating buffering. After ~7-12 seconds, Kubernetes will detect the probe timeout, kill the slow pod, and auto-heal the cluster.
+### 6. Start the Frontend
+
+Open a new terminal window, navigate to the `frontend` folder, and start the Next.js app:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Visit `http://localhost:3000` in your browser. Open multiple tabs to see the multi-user synchronization in action!
+
+---
+
+## 🎮 How to Use the Chaos Controls
+
+Once the app is running and you select a movie to stream, the **Chaos Controls** will unlock:
+
+1.  **Kill Active Server**: Simulates a catastrophic hardware crash or kernel panic. The server node turns red and dies. You will see traffic instantly reroute to a standby server while Kubernetes boots a replacement in the background. The video never stops playing.
+2.  **Slow Down Active Server**: Simulates a "Gray Failure" (e.g., a memory leak or network saturation). The active server turns orange and the traffic dot slows down. After about 13 seconds, Kubernetes health probes will timeout, detect the degraded state, and automatically trigger a self-healing sequence to replace the pod.
+3.  **Restart / Reset Cluster**: Instantly restores all 3 servers to a clean, healthy state.
+
+---
 
 ## 📝 License
-
-This project is open-source and available under the MIT License.
+This project is for educational and portfolio demonstration purposes.
