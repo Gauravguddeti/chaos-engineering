@@ -8,7 +8,8 @@ export async function GET(request) {
   const key = searchParams.get('key');
 
   if (key === ADMIN_KEY) {
-    cookies().set('adminToken', key, {
+    const cookieStore = await cookies();
+    cookieStore.set('adminToken', key, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',

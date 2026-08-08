@@ -5,13 +5,14 @@ const ADMIN_KEY = process.env.ADMIN_KEY;
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8001";
 
 export async function POST(request, { params }) {
-  const { action } = params;
+  const { action } = await params;
   
   if (!['kill', 'slow', 'reset'].includes(action)) {
     return new NextResponse('Invalid action', { status: 400 });
   }
 
-  const token = cookies().get('adminToken')?.value;
+  const cookieStore = await cookies();
+  const token = cookieStore.get('adminToken')?.value;
   if (token !== ADMIN_KEY) {
     return new NextResponse('Forbidden', { status: 403 });
   }

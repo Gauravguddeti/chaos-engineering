@@ -1,0 +1,13 @@
+@echo off
+title Cloud Hybrid Demo Startup
+echo Starting local cluster...
+start minikube start
+timeout /t 10
+echo Starting port forwarding...
+start powershell -NoExit -Command "while ($true) { kubectl port-forward svc/chaos-backend-svc 8000:8000; Start-Sleep -Seconds 1 }"
+echo Starting python state coordinator...
+start powershell -NoExit -Command "cd backend; python state_server.py"
+echo Starting ngrok tunnel...
+start powershell -NoExit -Command "ngrok http 8001 --domain=tatyana-unbenevolent-nonparabolically.ngrok-free.dev"
+echo Done! Your Vercel frontend is already deployed and will automatically connect to this tunnel.
+pause
