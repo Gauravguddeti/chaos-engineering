@@ -23,11 +23,20 @@ This project simulates a streaming platform (like Netflix) and allows you to int
 
 ### Prerequisites
 
-You need the following installed on your machine:
-*   [Docker Desktop](https://www.docker.com/products/docker-desktop) (must be running)
-*   [Minikube](https://minikube.sigs.k8s.io/docs/start/)
-*   [Node.js](https://nodejs.org/) (for the Next.js frontend)
-*   `kubectl` (usually installed with Docker Desktop or Minikube)
+You need the following installed on your machine. If you are on Windows, you can install all of them instantly using PowerShell (Run as Administrator):
+
+```powershell
+# Install Docker Desktop (Must be running before starting Minikube)
+winget install Docker.DockerDesktop
+
+# Install Minikube
+winget install Kubernetes.minikube
+
+# Install Node.js (Required for Next.js frontend)
+winget install OpenJS.NodeJS.LTS
+```
+
+*(Note: `kubectl` is automatically installed alongside Docker Desktop.)*
 
 ### Installation & Deployment
 
