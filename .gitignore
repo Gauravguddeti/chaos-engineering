@@ -1,0 +1,10 @@
+node_modules/
+.next/
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Explicitly excluded project documents per user request
+PRD.md
+PROGRESS.md

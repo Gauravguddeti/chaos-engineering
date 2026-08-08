@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: chaos-backend-svc
+spec:
+  # The selector matches pods with this label.
+  # Any pod the Deployment creates gets the label "app: chaos-backend",
+  # so this Service automatically routes to all 3 replicas.
+  selector:
+    app: chaos-backend
+
+  # NodePort exposes the Service on a fixed port on the Minikube node's IP.
+  # Why NodePort instead of LoadBalancer?
+  #   LoadBalancer on Minikube requires running "minikube tunnel" in the
+  #   background (needs admin rights, can be flaky on Windows).
+  #   NodePort just works — `minikube service chaos-backend-svc --url`
+  #   gives you a direct localhost URL with zero extra setup.
+  type: NodePort
+
+  ports:
+  - port: 8000         # Port the Service listens on (cluster-internal)
+    targetPort: 8000   # Port the container inside the pod is listening on
+    nodePort: 30080    # Fixed external port on the Minikube node.
+                       # Access the whole cluster at: <minikube-ip>:30080
+                       # Kubernetes load-balances across all 3 pod replicas.

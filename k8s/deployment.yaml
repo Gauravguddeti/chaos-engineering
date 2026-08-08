@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaos-backend
+  labels:
+    app: chaos-backend
+spec:
+  # 3 replicas = 3 independent pods running your backend.
+  # Kubernetes will always try to maintain exactly this number.
+  # Kill one → it schedules a replacement automatically.
+  replicas: 3
+  selector:
+    matchLabels:
+      app: chaos-backend
+  template:
+    metadata:
+      labels:
+        app: chaos-backend
+    spec:
+      # CRITICAL FIX: Reduce grace period from 30s (default) to 2s.
+      # When K8s kills a container (liveness probe failure), it sends SIGTERM
+      # and waits this long before sending SIGKILL. Uvicorn's graceful shutdown
+      # keeps SSE connections alive during this window — causing a 30s pause.
+      # With 2s, SIGKILL fires quickly, SSE closes, watchdog fires, auto-heal plays.
+      terminationGracePeriodSeconds: 2
+      containers:
+      - name: chaos-backend
+        image: chaos-backend:latest
+
+        # CRITICAL for local Minikube:
+        # "Never" means: use the image already loaded into Minikube's local
+        # Docker registry. Do NOT try to pull it from Docker Hub.
+        # Without this, Kubernetes will fail with "ImagePullBackOff" because
+        # chaos-backend:latest doesn't exist on any public registry.
+        imagePullPolicy: Never
+
+        ports:
+        - containerPort: 8000
+
+        # Resource limits: keep each pod small so 3 replicas fit comfortably
+        # on a laptop. 64Mi memory / 50m CPU requested, 128Mi / 200m ceiling.
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+
+        # Liveness probe: Kubernetes pings /health every 2 seconds.
+        # If it fails once (failureThreshold: 1), K8s immediately restarts the
+        # container. With timeoutSeconds: 2 and our /slow sleep of 3s, the probe
+        # times out on the FIRST try — restart happens in ~4 seconds total.
+        #
+        # Gray Failure Auto-Healing: /slow makes /health sleep 3s > 2s timeout
+        # → probe fails → K8s restarts the container within ~4 seconds.
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          timeoutSeconds: 2         # Fails if response takes > 2s (catches /slow mode)
+          initialDelaySeconds: 5    # Wait 5s after container starts before first probe
+          periodSeconds: 2          # Probe every 2 seconds (was 5s — faster detection)
+          failureThreshold: 1       # Restart after just 1 failure (was 2 — cuts 5s wait)
+
+        # Readiness probe: K8s only sends traffic to a pod when this passes.
+        # timeoutSeconds: 2 means the slow pod also loses readiness immediately,
+        # so K8s stops routing new traffic to it while it's degraded.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 3
+          periodSeconds: 3
+          timeoutSeconds: 2
