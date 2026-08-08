@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Server, Wifi, XCircle, Volume2, VolumeX, Play, Pause, ArrowLeft, Loader, Activity, User, Users } from "lucide-react";
 
-const WS_BASE = "ws://localhost:8001";   // State coordinator — single source of truth
+const WS_BASE = process.env.NEXT_PUBLIC_WS_BASE || "ws://localhost:8001";   // State coordinator — single source of truth
 
 // ─── CATALOGUE ─────────────────────────────────────────────────────────────────
 const CATALOGUE = [
@@ -61,6 +61,7 @@ export default function Home() {
   const [nowPlaying, setNowPlaying] = useState(null);
   const [countdown,  setCountdown]  = useState(null);
   const [logs,       setLogs]       = useState([]);
+  const [isAdmin,    setIsAdmin]    = useState(false);
 
   // ── Shared state — driven entirely by WebSocket from state server ──────────
   const [servers,     setServers]     = useState(makeInitialServers);
@@ -73,6 +74,7 @@ export default function Home() {
   // Initial log — client-only to avoid SSR hydration mismatch
   useEffect(() => {
     setLogs([makeLog("System ready. Select a title to begin streaming.", "info")]);
+    fetch('/api/me').then(r => r.json()).then(data => setIsAdmin(data.isAdmin)).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -206,26 +208,24 @@ export default function Home() {
   // ─── KILL ACTION ────────────────────────────────────────────────────────────
   // #5 Seamless kill: video keeps playing. The buffering overlay shows visually
   // around the still-playing video — no pause/resume cycle on the video element.
-  const triggerCrash = useCallback(() => {
+  const triggerCrash = useCallback(async () => {
     if (isBusy || !nowPlaying) return;
-    // DO NOT pause video — it plays continuously through the kill event.
-    // The infra layer + log animations tell the story without touching the video.
-    wsRef.current?.send(JSON.stringify({ type: "CHAOS_KILL" }));
+    await fetch('/api/chaos/kill', { method: 'POST' });
   }, [isBusy, nowPlaying]);
 
   // ─── SLOW ACTION ────────────────────────────────────────────────────────────
-  const triggerSlow = useCallback(() => {
+  const triggerSlow = useCallback(async () => {
     if (isBusy || !nowPlaying) return;
-    wsRef.current?.send(JSON.stringify({ type: "CHAOS_SLOW" }));
+    await fetch('/api/chaos/slow', { method: 'POST' });
   }, [isBusy, nowPlaying]);
 
   // ─── RESET ACTION ───────────────────────────────────────────────────────────
-  const triggerReset = useCallback(() => {
+  const triggerReset = useCallback(async () => {
     setIsPaused(false);
     if (videoRef.current && videoRef.current.paused) {
       videoRef.current.play().catch(() => {});
     }
-    wsRef.current?.send(JSON.stringify({ type: "CHAOS_RESET" }));
+    await fetch('/api/chaos/reset', { method: 'POST' });
   }, []);
 
   // ─── DERIVED ────────────────────────────────────────────────────────────────
@@ -387,50 +387,54 @@ export default function Home() {
 
         {/* RIGHT: Controls + Live Log */}
         <div className="glass-panel controls-panel">
-          <h2>Chaos Controls</h2>
+          {isAdmin && (
+            <>
+              <h2>Chaos Controls</h2>
 
-          <div className="btns">
-            <button
-              className="btn btn-crash"
-              onClick={triggerCrash}
-              disabled={isBusy || !isVideoPlaying}
-            >
-              💀 Kill Active Server
-            </button>
-            <button
-              className={`btn ${isSlowMode ? "btn-reset" : "btn-slow"}`}
-              onClick={triggerSlow}
-              disabled={isBusy || !isVideoPlaying}
-            >
-              {isSlowMode ? "✅ Undo Slowdown" : "🐌 Slow Down Active Server"}
-            </button>
-            <button
-              className="btn btn-reset"
-              onClick={triggerReset}
-              disabled={isBusy}
-            >
-              🔄 Restart / Reset Cluster
-            </button>
-          </div>
+              <div className="btns">
+                <button
+                  className="btn btn-crash"
+                  onClick={triggerCrash}
+                  disabled={isBusy || !isVideoPlaying}
+                >
+                  💀 Kill Active Server
+                </button>
+                <button
+                  className={`btn ${isSlowMode ? "btn-reset" : "btn-slow"}`}
+                  onClick={triggerSlow}
+                  disabled={isBusy || !isVideoPlaying}
+                >
+                  {isSlowMode ? "✅ Undo Slowdown" : "🐌 Slow Down Active Server"}
+                </button>
+                <button
+                  className="btn btn-reset"
+                  onClick={triggerReset}
+                  disabled={isBusy}
+                >
+                  🔄 Restart / Reset Cluster
+                </button>
+              </div>
 
-          {isSlowMode && (
-            <div className="countdown-banner">
-              <span className="countdown-label">⏱ K8s auto-heal</span>
-              <span className="countdown-num">
-                {countdown !== null && countdown > 0 ? `${countdown}s` : "⌛"}
-              </span>
-              <span className="countdown-sub">
-                {countdown !== null && countdown > 0
-                  ? "Health probe timing out"
-                  : "Detecting... healing soon"}
-              </span>
-            </div>
-          )}
+              {isSlowMode && (
+                <div className="countdown-banner">
+                  <span className="countdown-label">⏱ K8s auto-heal</span>
+                  <span className="countdown-num">
+                    {countdown !== null && countdown > 0 ? `${countdown}s` : "⌛"}
+                  </span>
+                  <span className="countdown-sub">
+                    {countdown !== null && countdown > 0
+                      ? "Health probe timing out"
+                      : "Detecting... healing soon"}
+                  </span>
+                </div>
+              )}
 
-          {!isVideoPlaying && (
-            <div className="gate-msg">
-              ⚠ Start playing a video first — select any title from the streaming homepage on the left to enable chaos controls.
-            </div>
+              {!isVideoPlaying && (
+                <div className="gate-msg">
+                  ⚠ Start playing a video first — select any title from the streaming homepage on the left to enable chaos controls.
+                </div>
+              )}
+            </>
           )}
 
           <div className="log-section">
@@ -560,10 +564,10 @@ function ServerNode({ server, viewers = [], myViewerId }) {
       <div className="node-label">{server.label}</div>
       <div className="node-status" style={{ color }}>{server.status}</div>
 
-      {/* #2: Viewer pips — stacked vertically, animated in/out */}
+      {/* #2: Viewer pips — stacked vertically, animated in/out, capped at 5 */}
       <div className="viewer-pips">
         <AnimatePresence initial={false}>
-          {viewers.map((viewer, i) => (
+          {viewers.slice(0, 5).map((viewer, i) => (
             <ViewerPip
               key={viewer.id}
               viewer={viewer}
@@ -571,6 +575,22 @@ function ServerNode({ server, viewers = [], myViewerId }) {
               isMine={viewer.id === myViewerId}
             />
           ))}
+          {viewers.length > 5 && (
+            <motion.div
+              key="overflow-badge"
+              className="viewer-pip overflow-badge"
+              layout
+              initial={{ opacity: 0, height: 0, y: -8 }}
+              animate={{ opacity: 1, height: "auto", y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -8 }}
+              transition={{
+                layout:  { type: "spring", stiffness: 400, damping: 30 },
+                default: { duration: 0.25, ease: "easeOut" },
+              }}
+            >
+              +{viewers.length - 5} more
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
     </motion.div>

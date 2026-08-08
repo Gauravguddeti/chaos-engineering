@@ -19,8 +19,10 @@ import asyncio
 import json
 import uuid
 import time
+import os
+from collections import deque
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
@@ -28,8 +30,10 @@ K8S_URL = "http://localhost:8000"
 
 # ── Tunable constants ──────────────────────────────────────────────────────────
 HEAL_FALLBACK_DELAY  = 13.0   # seconds after /slow before we force auto-heal
-LOAD_THRESHOLD       = 3      # viewers on ONE server that triggers extra-server activation
+LOAD_THRESHOLD       = 5      # viewers on ONE server that triggers extra-server activation
 LOAD_CHECK_INTERVAL  = 2.0    # how often load-balance loop runs (seconds)
+
+ADMIN_TOKEN = os.environ.get("ADMIN_KEY", "f0177230bbdac3587cbdee7114cbd897c6f7181c4c639bc8c8cf56fb13e09e14")
 
 # ── Shared state ───────────────────────────────────────────────────────────────
 state = {
@@ -57,6 +61,10 @@ _sse_last_msg_time: float     = time.time()
 
 # ── Heal fallback task reference (one at a time) ───────────────────────────────
 _heal_fallback_task: asyncio.Task | None = None
+
+# ── Rate limiting ──────────────────────────────────────────────────────────────
+_ip_last_join_time = {}
+_global_join_timestamps = deque(maxlen=30)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -203,6 +211,22 @@ async def load_balance_loop():
                 extra = next((s for s in active_servers if s["id"] != primary_id), None)
                 if extra and viewer_count_for(extra["id"]) == 0:
                     await _deactivate_load_server(extra)
+
+        # ── Dynamic Pool Capacity (Maintain exactly 2 standbys) ──
+        standbys = [s for s in state["servers"] if s["status"] == "standby"]
+        if len(standbys) < 2:
+            needed = 2 - len(standbys)
+            for _ in range(needed):
+                new_id, new_label = next_server_id_label()
+                state["servers"].append({"id": new_id, "label": new_label, "status": "standby"})
+            await broadcast("POOL_GROWN", {"log": {"msg": f"📈 Pool grown to maintain standby capacity.", "type": "info"}})
+        elif len(standbys) > 2:
+            excess = len(standbys) - 2
+            for _ in range(excess):
+                s = next((s for s in reversed(state["servers"]) if s["status"] == "standby"), None)
+                if s:
+                    state["servers"].remove(s)
+            await broadcast("POOL_SHRUNK", {"log": {"msg": f"📉 Pool shrunk to remove excess capacity.", "type": "info"}})
 
 
 async def _activate_load_server(overloaded, new_active):
@@ -560,6 +584,23 @@ async def handle_message(data: dict, ws: WebSocket):
     t = data.get("type")
 
     if t == "VIEWER_JOIN":
+        now = time.time()
+        ip = ws.client.host if ws.client else "unknown"
+        
+        # Rate limit: 1 per 2s per IP
+        if now - _ip_last_join_time.get(ip, 0) < 2.0:
+            return
+            
+        # Global limit: 30 per 60s
+        while _global_join_timestamps and now - _global_join_timestamps[0] > 60:
+            _global_join_timestamps.popleft()
+            
+        if len(_global_join_timestamps) >= 30:
+            return
+            
+        _global_join_timestamps.append(now)
+        _ip_last_join_time[ip] = now
+
         sid = assign_server_for_new_viewer()
         viewer = {
             "id":       str(uuid.uuid4())[:8],
@@ -581,18 +622,6 @@ async def handle_message(data: dict, ws: WebSocket):
         vid = data.get("viewerId")
         state["viewers"] = [v for v in state["viewers"] if v["id"] != vid]
         await broadcast("VIEWER_LEFT", {"viewerId": vid})
-
-    elif t == "CHAOS_KILL":
-        asyncio.create_task(_do_kill())
-
-    elif t == "CHAOS_SLOW":
-        if state["isSlowMode"]:
-            asyncio.create_task(_do_undo_slow())
-        else:
-            asyncio.create_task(_do_slow())
-
-    elif t == "CHAOS_RESET":
-        asyncio.create_task(_do_reset())
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -618,20 +647,42 @@ app.add_middleware(
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connected.append(websocket)
-    await websocket.send_text(json.dumps({
-        "type": "STATE_UPDATE", "state": _public_state()
-    }))
     try:
+        await websocket.send_text(json.dumps({"type": "STATE_UPDATE", "state": _public_state()}))
         while True:
-            raw = await websocket.receive_text()
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
+            data = await websocket.receive_json()
             await handle_message(data, websocket)
     except WebSocketDisconnect:
         _remove_websocket(websocket)
-        await broadcast("VIEWER_LEFT")
+        await broadcast()
+
+
+# ── Secure Admin Endpoints ─────────────────────────────────────────────────────
+
+def _verify_admin(x_admin_token: str | None = Header(None)):
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+@app.post("/admin/kill")
+async def admin_kill(x_admin_token: str | None = Header(None)):
+    _verify_admin(x_admin_token)
+    asyncio.create_task(_do_kill())
+    return {"status": "ok"}
+
+@app.post("/admin/slow")
+async def admin_slow(x_admin_token: str | None = Header(None)):
+    _verify_admin(x_admin_token)
+    if state["isSlowMode"]:
+        asyncio.create_task(_do_undo_slow())
+    else:
+        asyncio.create_task(_do_slow())
+    return {"status": "ok"}
+
+@app.post("/admin/reset")
+async def admin_reset(x_admin_token: str | None = Header(None)):
+    _verify_admin(x_admin_token)
+    asyncio.create_task(_do_reset())
+    return {"status": "ok"}
 
 
 @app.get("/ping")
