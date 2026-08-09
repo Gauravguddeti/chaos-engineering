@@ -26,7 +26,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPExcepti
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
-K8S_URL = "http://localhost:8000"
+K8S_URL = os.environ.get("K8S_URL", "http://localhost:8000")
+NGROK_HEADERS = {"ngrok-skip-browser-warning": "true"} if "ngrok" in K8S_URL else {}
 
 # ── Tunable constants ──────────────────────────────────────────────────────────
 HEAL_FALLBACK_DELAY  = 13.0   # seconds after /slow before we force auto-heal
@@ -142,7 +143,7 @@ async def monitor_k8s_sse():
 
     while True:
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
+            async with httpx.AsyncClient(timeout=None, headers=NGROK_HEADERS) as client:
                 async with client.stream("GET", f"{K8S_URL}/stream") as resp:
                     print("[SSE] Connected to K8s stream")
                     async for line in resp.aiter_lines():
@@ -313,7 +314,7 @@ async def _do_kill():
             "log": {"msg": f"💀 Killing {dead_label}…", "type": "error"}
         })
 
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(headers=NGROK_HEADERS) as c:
             try:
                 await c.post(f"{K8S_URL}/crash", timeout=5)
             except Exception:
@@ -387,7 +388,7 @@ async def _do_slow():
             if v["serverId"] == active["id"]:
                 v["status"] = "degraded"
 
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(headers=NGROK_HEADERS) as c:
             try:
                 await c.post(f"{K8S_URL}/slow", timeout=5)
             except Exception:
@@ -443,7 +444,7 @@ async def _do_undo_slow():
             if v.get("status") == "degraded":
                 v["status"] = "ok"
 
-        async with httpx.AsyncClient() as c:
+        async with httpx.AsyncClient(headers=NGROK_HEADERS) as c:
             try:
                 await c.post(f"{K8S_URL}/reset", timeout=5)
             except Exception:
@@ -694,4 +695,5 @@ async def ping():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
+    port = int(os.environ.get("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
