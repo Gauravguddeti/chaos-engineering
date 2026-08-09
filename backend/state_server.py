@@ -587,19 +587,14 @@ async def handle_message(data: dict, ws: WebSocket):
         now = time.time()
         ip = ws.client.host if ws.client else "unknown"
         
-        # Rate limit: 1 per 2s per IP
-        if now - _ip_last_join_time.get(ip, 0) < 2.0:
-            return
-            
-        # Global limit: 30 per 60s
+        # Global limit: 200 joins per 60s (Plenty for a 30-person class refreshing a few times)
         while _global_join_timestamps and now - _global_join_timestamps[0] > 60:
             _global_join_timestamps.popleft()
             
-        if len(_global_join_timestamps) >= 30:
+        if len(_global_join_timestamps) >= 200:
             return
             
         _global_join_timestamps.append(now)
-        _ip_last_join_time[ip] = now
 
         sid = assign_server_for_new_viewer()
         viewer = {

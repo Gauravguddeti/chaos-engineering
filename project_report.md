@@ -125,17 +125,30 @@ You open the website, start watching a movie, then **kill a server mid-stream**.
 
 ---
 
-### ⚛️ Next.js — The Frontend
+### ⚛️ Next.js + Vercel — The Frontend
 
-**What it is:** A React-based JavaScript framework for building modern web applications.
+**What it is:** A React-based JavaScript framework deployed globally on Vercel's Edge Network.
 
 **What it does in our project:**
-- Renders the **StreamFlux** streaming homepage (hero banner, movie posters, content rows)
-- Renders the **Chaos Controls** panel (Kill, Slow, Reset buttons + Live System Log)
-- Renders the **Infrastructure Layer** (animated server nodes at the bottom)
+- Renders the **StreamFlux** streaming homepage
+- Renders the **Chaos Controls** panel and **Infrastructure Layer**
+- Delivered instantly to users via Vercel's CDN
 - Connects to the backend via **Server-Sent Events (SSE)** for real-time updates
 
 **Analogy:** Next.js is the **TV screen** of our project. Everything the user sees and interacts with lives here.
+
+---
+
+### 🚇 ngrok — The Secure Tunnel
+
+**What it is:** A globally distributed reverse proxy that exposes local servers behind NATs and firewalls to the public internet over secure tunnels.
+
+**What it does in our project:**
+- Exposes our local Minikube cluster and Python coordinator to the world securely.
+- Allows an entire classroom of students to connect to the backend running directly on a laptop.
+- Handles SSL/TLS encryption automatically.
+
+**Analogy:** ngrok is like a **secure wormhole** from the internet directly into your local machine.
 
 ---
 
@@ -176,15 +189,26 @@ You open the website, start watching a movie, then **kill a server mid-stream**.
 │   ┌──────────────┐          ┌────────────────────────────────┐  │
 │   │  StreamFlux  │          │       Chaos Controls           │  │
 │   │  (Next.js)   │          │  Kill | Slow | Reset | Log     │  │
+│   │  ON VERCEL   │          │  (Protected by Admin Token)    │  │
 │   └──────┬───────┘          └──────────────┬─────────────────┘  │
-│          │                                  │                    │
-└──────────┼──────────────────────────────────┼────────────────────┘
-           │ HTTP / SSE                        │ HTTP POST
+│          │                                  │                   │
+└──────────┼──────────────────────────────────┼───────────────────┘
+           │ HTTP / WebSockets                │ HTTP POST
            │                                  │
     ┌──────▼──────────────────────────────────▼──────┐
-    │        kubectl port-forward (localhost:8000)    │
-    │                 "The Bridge"                    │
-    └─────────────────────┬───────────────────────────┘
+    │                     ngrok                      │
+    │         (Secure Tunnel over Internet)          │
+    └─────────────────────┬──────────────────────────┘
+                          │
+    ┌─────────────────────▼──────────────────────────────────────┐
+    │        Python State Server (localhost:8001)                │
+    │     (Handles WebSockets, load balances users)              │
+    └─────────────────────┬──────────────────────────────────────┘
+                          │
+    ┌─────────────────────▼──────────────────────────────────────┐
+    │        kubectl port-forward (localhost:8000)               │
+    │                 "The Bridge"                               │
+    └─────────────────────┬──────────────────────────────────────┘
                           │
     ┌─────────────────────▼──────────────────────────────────────┐
     │                  KUBERNETES (Minikube)                      │
@@ -203,13 +227,14 @@ You open the website, start watching a movie, then **kill a server mid-stream**.
 ```
 
 **Data flow:**
-1. Browser loads the Next.js frontend at `localhost:3000`
-2. Frontend opens an SSE connection to `localhost:8000/stream`
-3. `kubectl port-forward` tunnels this into Minikube → hits one specific pod
-4. That pod sends a live heartbeat every second with its status
-5. When user clicks a chaos button, a POST request goes to the same pod
-6. Kubernetes continuously monitors all 3 pods via the Liveness Probe
-7. If a pod fails → K8s kills and restarts it → SSE reconnects → frontend detects heal
+1. Audience loads the Next.js frontend on **Vercel**
+2. Frontend opens a WebSocket connection to the **ngrok** URL
+3. ngrok tunnels the request to the **Python State Server** (`localhost:8001`)
+4. The State Server opens an SSE connection to **Minikube** via `kubectl port-forward`
+5. That K8s pod sends a live heartbeat every second with its status back up the chain
+6. When the Admin clicks a chaos button, a POST request goes through ngrok to K8s
+7. Kubernetes continuously monitors all 3 pods via the Liveness Probe
+8. If a pod fails → K8s kills and restarts it → SSE reconnects → frontend detects heal
 
 ---
 
@@ -451,9 +476,11 @@ Our `deployment.yaml` and `service.yaml` are **declarative configuration files**
 | **Kubernetes (K8s)** | Orchestration | Deploy, manage, and heal containers |
 | **Minikube** | Local K8s | Run full K8s cluster on a laptop |
 | **Next.js** | Frontend Framework | StreamFlux UI + Chaos Controls panel |
+| **Vercel** | Cloud CDN | Global deployment of the frontend |
+| **ngrok** | Secure Tunnel | Expose local K8s to the public internet |
 | **Framer Motion** | Animation | Smooth server node transitions |
 | **kubectl** | K8s CLI | Control cluster, port-forward |
-| **SSE** | Protocol | Real-time push from backend to browser |
+| **WebSockets/SSE** | Protocol | Real-time push from backend to browser |
 | **Python** | Language | Backend logic |
 | **JavaScript** | Language | Frontend logic |
 

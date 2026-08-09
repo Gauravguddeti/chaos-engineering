@@ -24,8 +24,9 @@ The architecture is built purely on local, open-source tools—no cloud provider
 *   **Frontend**: Next.js (React), Framer Motion (Animations), pure CSS (Glassmorphism UI)
 *   **State Coordinator**: FastAPI (Python), WebSockets
 *   **Backend Application**: Python (Uvicorn/FastAPI)
-*   **Containerization**: Docker Desktop (WSL2 integration on Windows)
+*   **Containerization**: Docker Desktop
 *   **Orchestration**: Minikube (Local Kubernetes)
+*   **Cloud Deployment**: Vercel (Frontend CDN) + ngrok (Secure Local Tunnel)
 
 ![Infrastructure Diagram](./frontend/public/architecture.png) *(Note: Generate or add architecture screenshot here)*
 
@@ -82,29 +83,22 @@ minikube start --driver=docker
     kubectl port-forward svc/chaos-backend-svc 8000:8000
     ```
 
-### 5. Start the State Coordinator
+### 5. Live Classroom Deployment (Cloud + Local Hybrid)
 
-Open a new terminal window, navigate to the `backend` folder, and start the WebSocket coordinator:
+To share this demo with a classroom or audience without paying for a real cloud Kubernetes cluster, we use a hybrid approach:
+1. **Frontend (Vercel)**: The Next.js app and heavy MP4 videos are deployed statically to Vercel's global CDN.
+2. **Backend (ngrok)**: An `ngrok` tunnel securely exposes your local Minikube cluster and Python state server to the public internet.
 
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate
-pip install -r requirements.txt
-python state_server.py
-```
+**To start the live demo:**
+1. Open **Docker Desktop**.
+2. Double-click the `start_cloud_demo.bat` script. This automatically starts Minikube, port-forwarding, the Python coordinator, and the `ngrok` tunnel in the background.
+3. Share your public Vercel link with the audience. They will connect directly to your laptop!
 
-### 6. Start the Frontend
+### 6. Local Development Only (Alternative)
 
-Open a new terminal window, navigate to the `frontend` folder, and start the Next.js app:
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-Visit `http://localhost:3000` in your browser. Open multiple tabs to see the multi-user synchronization in action!
+If you just want to run it entirely locally without Vercel:
+1. Open a new terminal in `backend`, activate the venv, and run `python state_server.py`.
+2. Open a new terminal in `frontend` and run `npm run dev`. Visit `http://localhost:3000`.
 
 ---
 
