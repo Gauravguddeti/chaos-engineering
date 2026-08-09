@@ -83,16 +83,16 @@ minikube start --driver=docker
     kubectl port-forward svc/chaos-backend-svc 8000:8000
     ```
 
-### 5. Live Classroom Deployment (Cloud + Local Hybrid)
+### 5. Live Public Deployment (Cloud + Local Hybrid)
 
-To share this demo with a classroom or audience without paying for a real cloud Kubernetes cluster, we use a hybrid approach:
+To share this demo publicly or with an audience without paying for a real cloud Kubernetes cluster, we use a hybrid approach:
 1. **Frontend (Vercel)**: The Next.js app and heavy MP4 videos are deployed statically to Vercel's global CDN.
 2. **Backend (ngrok)**: An `ngrok` tunnel securely exposes your local Minikube cluster and Python state server to the public internet.
 
-**To start the live demo:**
+**To start the live public demo:**
 1. Open **Docker Desktop**.
 2. Double-click the `start_cloud_demo.bat` script. This automatically starts Minikube, port-forwarding, the Python coordinator, and the `ngrok` tunnel in the background.
-3. Share your public Vercel link with the audience. They will connect directly to your laptop!
+3. Share your public Vercel link with your audience. They will connect directly to your laptop!
 
 ### 6. Local Development Only (Alternative)
 
