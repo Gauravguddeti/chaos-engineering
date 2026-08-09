@@ -6,6 +6,27 @@ This project features a fully functional video streaming frontend connected to a
 
 ---
 
+## 📸 Screenshots
+
+*Drop your screenshot images into the `docs/screenshots/` folder to display them here!*
+
+<div align="center">
+  <img src="./docs/screenshots/dashboard.png" width="800" alt="Dashboard Overview" />
+  <p><i>The main streaming dashboard with real-time Kubernetes cluster topology and live viewers.</i></p>
+</div>
+<br/>
+<div align="center">
+  <img src="./docs/screenshots/chaos.png" width="800" alt="Chaos Engineering Controls" />
+  <p><i>The Admin Chaos Controls panel and live system logs tracking self-healing events.</i></p>
+</div>
+<br/>
+<div align="center">
+  <img src="./docs/screenshots/mobile.png" width="400" alt="Mobile Responsive Layout" />
+  <p><i>Full mobile compatibility with dynamic layout stacking and horizontal swipeable infrastructure.</i></p>
+</div>
+
+---
+
 ## 🚀 Features
 
 *   **Self-Healing Kubernetes Cluster**: A backend powered by a Minikube Kubernetes cluster running multiple replica pods. If a pod crashes, Kubernetes automatically detects the failure and spins up a replacement.
