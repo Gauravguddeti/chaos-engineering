@@ -210,8 +210,15 @@ async def load_balance_loop():
                 primary_id = state["activeServerId"]
                 # Pick the extra active server (not the primary)
                 extra = next((s for s in active_servers if s["id"] != primary_id), None)
-                if extra and viewer_count_for(extra["id"]) == 0:
-                    await _deactivate_load_server(extra)
+                if extra:
+                    # Shift users back if total load is safe
+                    if len(state["viewers"]) <= LOAD_THRESHOLD:
+                        for v in state["viewers"]:
+                            if v["serverId"] == extra["id"]:
+                                v["serverId"] = primary_id
+                        await _deactivate_load_server(extra)
+                    elif viewer_count_for(extra["id"]) == 0:
+                        await _deactivate_load_server(extra)
 
         # ── Dynamic Pool Capacity (Maintain exactly 2 standbys) ──
         standbys = [s for s in state["servers"] if s["status"] == "standby"]
@@ -649,7 +656,10 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_json()
             await handle_message(data, websocket)
     except WebSocketDisconnect:
-        _remove_websocket(websocket)
+        if websocket in connected:
+            connected.remove(websocket)
+        vid = id(websocket)
+        state["viewers"] = [v for v in state["viewers"] if v.get("_wsId") != vid]
         await broadcast()
 
 
