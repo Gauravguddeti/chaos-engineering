@@ -638,3 +638,52 @@ header h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
   letter-spacing: 0.06em;
   opacity: 0.8;
 }
+
+/* ─── MOBILE RESPONSIVENESS ──────────────────────────── */
+@media (max-width: 900px) {
+  html, body {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto; /* Allow scrolling on mobile */
+  }
+  
+  .dashboard {
+    height: auto;
+    min-height: 100vh;
+    padding: 0.8rem;
+    gap: 0.8rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .top-section {
+    grid-template-columns: 1fr; /* Stack video and controls vertically */
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .streaming-box {
+    min-height: 35vh; /* Ensure video has enough space */
+  }
+  
+  .controls-panel {
+    min-height: 400px;
+  }
+
+  .infra-panel {
+    padding: 0.8rem;
+  }
+
+  .infra-flow {
+    overflow-x: auto; /* Allow swiping horizontally through servers */
+    padding-bottom: 0.5rem;
+    scrollbar-width: none;
+  }
+  .infra-flow::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .poster-card {
+    width: 90px; /* Slightly smaller posters */
+  }
+}
